@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
