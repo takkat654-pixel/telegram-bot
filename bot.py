@@ -16,6 +16,7 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI
 # เก็บประวัติแชทและโมเดลที่เลือกของแต่ละ user
 chat_histories: dict[int, list] = {}
 user_models: dict[int, str] = {}
+user_names: dict[int, str] = {}
 
 MODELS = {
     "groq": {"name": "Groq (LLaMA 3.3)", "model": "llama-3.3-70b-versatile"},
@@ -30,7 +31,11 @@ def get_user_model(user_id: int) -> str:
 
 async def ask_ai(user_id: int, messages: list) -> str:
     model_key = get_user_model(user_id)
-    system = {"role": "system", "content": "คุณคือผู้ช่วย AI ที่เป็นมิตร ตอบเป็นภาษาไทยถ้าผู้ใช้คุยภาษาไทย"}
+    name = user_names.get(user_id)
+    system_content = "คุณคือผู้ช่วย AI ที่เป็นมิตร ตอบเป็นภาษาไทยถ้าผู้ใช้คุยภาษาไทย"
+    if name:
+        system_content += f" ชื่อของผู้ใช้คือ {name} ให้เรียกชื่อเขาในการสนทนาด้วย"
+    system = {"role": "system", "content": system_content}
 
     if model_key == "groq":
         response = groq_client.chat.completions.create(
@@ -66,6 +71,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "สวัสดี! ฉันคือบอท AI\nพิมพ์อะไรก็ได้เพื่อคุยกัน!",
         reply_markup=MAIN_KEYBOARD,
     )
+
+
+async def setname(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if context.args:
+        name = " ".join(context.args)
+        user_names[user_id] = name
+        await update.message.reply_text(f"จำชื่อของคุณแล้วครับ: *{name}* 😊", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("กรุณาบอกชื่อด้วยครับ เช่น `/setname เอก`", parse_mode="Markdown")
 
 
 async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -269,6 +284,7 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(CommandHandler("model", model_command))
+    app.add_handler(CommandHandler("setname", setname))
     app.add_handler(CommandHandler("chatid", chatid))
     app.add_handler(CommandHandler("news", news_command))
     app.add_handler(CommandHandler("summary", summary_command))
