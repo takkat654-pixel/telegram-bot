@@ -11,7 +11,7 @@ load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
 
 # เก็บประวัติแชทและโมเดลที่เลือกของแต่ละ user
 chat_histories: dict[int, list] = {}
@@ -39,6 +39,8 @@ async def ask_ai(user_id: int, messages: list) -> str:
             max_tokens=1024,
         )
     else:
+        if not openai_client:
+            return "ยังไม่ได้ตั้งค่า OpenAI API Key ครับ"
         response = openai_client.chat.completions.create(
             model=MODELS["gpt"]["model"],
             messages=[system, *messages],
