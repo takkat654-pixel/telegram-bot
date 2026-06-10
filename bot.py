@@ -55,6 +55,8 @@ async def ask_ai(user_id: int, messages: list) -> str:
     return response.choices[0].message.content
 
 
+ADMIN_ID = 8550023812
+
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📰 ข่าว AI"), KeyboardButton("🤖 เปลี่ยน AI")],
@@ -65,11 +67,23 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
     is_persistent=True,
 )
 
+USER_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("📰 ข่าว AI")],
+        [KeyboardButton("📝 สรุปข้อความ"), KeyboardButton("🌐 แปลภาษา")],
+        [KeyboardButton("🗑 ล้างแชท"), KeyboardButton("ℹ️ Chat ID")],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    keyboard = MAIN_KEYBOARD if user_id == ADMIN_ID else USER_KEYBOARD
     await update.message.reply_text(
         "สวัสดี! ฉันคือบอท AI\nพิมพ์อะไรก็ได้เพื่อคุยกัน!",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=keyboard,
     )
 
 
