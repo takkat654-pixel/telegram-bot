@@ -2,6 +2,8 @@ import os
 import asyncio
 import re
 import base64
+from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
 import feedparser
 from groq import Groq
 from openai import OpenAI
@@ -9,6 +11,8 @@ from dotenv import load_dotenv
 from urllib.parse import quote
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+import meta_ads
 
 load_dotenv()
 
@@ -28,6 +32,24 @@ MODELS = {
 DEFAULT_MODEL = "groq"
 VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 ADMIN_ID = 8550023812
+
+BANGKOK_TZ = ZoneInfo("Asia/Bangkok")
+ADS_DAILY_REPORT_HOUR = int(os.getenv("ADS_DAILY_REPORT_HOUR", "9"))
+ADS_WATCH_INTERVAL_SECONDS = int(os.getenv("ADS_WATCH_INTERVAL_SECONDS", str(2 * 3600)))
+ads_alerted_today: dict[str, set[str]] = {}
+
+ADS_PERIODS = {
+    "today": "today",
+    "วันนี้": "today",
+    "yesterday": "yesterday",
+    "เมื่อวาน": "yesterday",
+    "week": "last_7d",
+    "7d": "last_7d",
+    "สัปดาห์": "last_7d",
+    "month": "last_30d",
+    "30d": "last_30d",
+    "เดือน": "last_30d",
+}
 
 
 def get_user_model(user_id: int) -> str:
@@ -70,7 +92,8 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("📝 สรุปข้อความ"), KeyboardButton("🌐 แปลภาษา")],
         [KeyboardButton("🎨 สร้างภาพ"), KeyboardButton("🔍 วิเคราะห์รูป")],
         [KeyboardButton("📒 Note"), KeyboardButton("⏰ Reminder")],
-        [KeyboardButton("🗑 ล้างแชท"), KeyboardButton("ℹ️ Chat ID")],
+        [KeyboardButton("📊 ยิงแอด"), KeyboardButton("ℹ️ Chat ID")],
+        [KeyboardButton("🗑 ล้างแชท")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -429,6 +452,96 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ─── Meta (Facebook) Ads ──────────────────────────────────────────────────────
+
+async def ads_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("ฟีเจอร์นี้สำหรับแอดมินเท่านั้นครับ")
+        return
+
+    period_arg = context.args[0].lower() if context.args else "today"
+    date_preset = ADS_PERIODS.get(period_arg, "today")
+
+    await update.message.chat.send_action("typing")
+    try:
+        insights = meta_ads.fetch_insights(date_preset)
+        text = meta_ads.format_insights_message(insights, date_preset)
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except meta_ads.AdsConfigError:
+        await update.message.reply_text(
+            "⚠️ ยังไม่ได้ตั้งค่าการเชื่อมต่อ Meta Ads API ครับ\n"
+            "พิมพ์ /adshelp เพื่อดูวิธีตั้งค่า"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"เกิดข้อผิดพลาดในการดึงข้อมูลแอด: {str(e)}")
+
+
+async def adshelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("ฟีเจอร์นี้สำหรับแอดมินเท่านั้นครับ")
+        return
+
+    await update.message.reply_text(
+        "📊 *วิธีตั้งค่าเชื่อมต่อ Facebook/Meta Ads*\n\n"
+        "1️⃣ หา *Ad Account ID*\n"
+        "ไปที่ business.facebook.com/adsmanager แล้วดูเลข Account ID มุมขวาบน "
+        "(ตัวเลขล้วน จะใส่ `act_` นำหน้าหรือไม่ก็ได้)\n\n"
+        "2️⃣ สร้าง *Access Token*\n"
+        "- ไปที่ developers.facebook.com > สร้างแอปประเภท Business\n"
+        "- เพิ่มสิทธิ์ `ads_read`\n"
+        "- แนะนำใช้ System User Token จาก Meta Business Settings > Users > "
+        "System Users (ตั้งอายุยาว ไม่หมดเร็วเหมือน token ทดสอบ)\n\n"
+        "3️⃣ ตั้งค่า Environment Variables บนโฮสต์ที่รันบอท:\n"
+        "`META_ACCESS_TOKEN=xxxx`\n"
+        "`META_AD_ACCOUNT_ID=1234567890`\n\n"
+        "ตั้งค่าเพิ่มเติม (ไม่บังคับ):\n"
+        "`META_CURRENCY_LABEL=บาท`\n"
+        "`ADS_SPEND_ALERT_THRESHOLD=1000` — แจ้งเตือนเมื่อยอดใช้จ่ายวันนี้ถึงจำนวนนี้\n"
+        "`ADS_ZERO_RESULTS_SPEND_THRESHOLD=500` — แจ้งเตือนถ้าใช้เงินเกินนี้แต่ยังไม่มีผลลัพธ์\n"
+        "`ADS_DAILY_REPORT_HOUR=9` — ชั่วโมงที่จะส่งสรุปรายวัน (เวลาไทย)\n\n"
+        "ตั้งค่าเสร็จแล้วรีสตาร์ทบอท แล้วพิมพ์ /ads ได้เลยครับ\n\n"
+        "คำสั่งที่ใช้ได้: `/ads`, `/ads yesterday`, `/ads week`, `/ads month`",
+        parse_mode="Markdown",
+    )
+
+
+async def ads_daily_report_callback(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    if not meta_ads.is_configured():
+        return
+    try:
+        insights = meta_ads.fetch_insights("yesterday")
+        text = meta_ads.format_insights_message(insights, "yesterday")
+    except Exception as e:
+        text = f"⚠️ ดึงข้อมูลสรุปแอดรายวันไม่สำเร็จ: {str(e)}"
+    await context.bot.send_message(chat_id=job.chat_id, text=text, parse_mode="Markdown")
+
+
+async def ads_watch_callback(context: ContextTypes.DEFAULT_TYPE):
+    if not meta_ads.is_configured():
+        return
+    try:
+        insights = meta_ads.fetch_insights("today")
+        warnings = meta_ads.check_anomalies(insights)
+    except Exception:
+        return  # avoid spamming admin with transient API errors
+
+    if not warnings:
+        return
+
+    today_key = datetime.now(BANGKOK_TZ).strftime("%Y-%m-%d")
+    sent = ads_alerted_today.setdefault(today_key, set())
+    new_warnings = [w for w in warnings if w not in sent]
+    if not new_warnings:
+        return
+    sent.update(new_warnings)
+
+    text = "🚨 *แจ้งเตือนแอด*\n\n" + "\n\n".join(new_warnings)
+    await context.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
+
+
 # ─── Message Handler ──────────────────────────────────────────────────────────
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -484,6 +597,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif user_text == "ℹ️ Chat ID":
         await chatid(update, context)
         return
+    elif user_text == "📊 ยิงแอด":
+        context.args = []
+        await ads_command(update, context)
+        return
 
     # Waiting states
     if context.user_data.get("waiting_summary"):
@@ -537,8 +654,24 @@ async def main():
     app.add_handler(CommandHandler("notes", notes_command))
     app.add_handler(CommandHandler("delnote", delnote_command))
     app.add_handler(CommandHandler("remind", remind_command))
+    app.add_handler(CommandHandler("ads", ads_command))
+    app.add_handler(CommandHandler("adshelp", adshelp_command))
     app.add_handler(MessageHandler(filters.PHOTO, analyze_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    if app.job_queue and meta_ads.is_configured():
+        app.job_queue.run_daily(
+            ads_daily_report_callback,
+            time=dt_time(hour=ADS_DAILY_REPORT_HOUR, minute=0, tzinfo=BANGKOK_TZ),
+            chat_id=ADMIN_ID,
+            name="ads_daily_report",
+        )
+        app.job_queue.run_repeating(
+            ads_watch_callback,
+            interval=ADS_WATCH_INTERVAL_SECONDS,
+            first=60,
+            name="ads_watch",
+        )
 
     print("บอทเริ่มทำงานแล้ว...")
     async with app:
